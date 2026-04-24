@@ -10,6 +10,9 @@ import re
 from typing import Any
 
 from google.adk.tools.tool_context import ToolContext
+from pydantic import ValidationError
+
+from ..schemas.model import TaskItem
 
 _SUPPORTED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm"}
 _STATUS_VALUES = {"완료", "진행", "진행중", "진행 중", "예정", "지연"}
@@ -34,6 +37,15 @@ _NAME_STOPWORDS = {
     "프로젝트",
     "구축",
 }
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    parts: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err.get("loc", []))
+        msg = err.get("msg", "invalid value")
+        parts.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(parts[:5])
 
 
 def _extract_inline_bytes(raw_data: Any) -> bytes | None:
@@ -942,6 +954,16 @@ async def parse_and_analyze_tool(
         "total_count": len(records),
         "anomalies": anomalies,
     }
+    try:
+        validated = [TaskItem.model_validate(record).model_dump(mode="json") for record in records]
+        result["records"] = validated
+        result["total_count"] = len(validated)
+    except ValidationError as exc:
+        return {
+            "error": f"파싱 결과 검증 실패(TaskItem): {_format_validation_error(exc)}",
+            "anomalies": anomalies[:20],
+        }
+
     if artifact_name:
         result["artifact_name"] = artifact_name
         result["resolved_file_path"] = str(path)

@@ -6,21 +6,10 @@ from datetime import date
 import json
 
 from google.adk.tools.tool_context import ToolContext
+from pydantic import ValidationError
 
-from ._utils import parse_json_dict
-
-_COMPLETION_RATE_THRESHOLD = 0.8
-_MAX_KEY_ACHIEVEMENTS = 3
-_MAX_KEY_ISSUES = 3
-_MAX_NEXT_WEEK_FOCUS = 20
-_MAX_TOP_ISSUES = 10
-_MAX_DECISIONS_NEEDED = 10
-
-_STATUS_SUMMARY_TEXT = {
-    "RED": "리스크 우선 대응이 필요한 프로젝트가 포함되어 있습니다.",
-    "YELLOW": "일부 이슈가 있어 모니터링이 필요합니다.",
-    "GREEN": "전반적으로 안정적인 진행 상태입니다.",
-}
+from ..schemas.model import AnalysisResult
+from ..schemas.model import ProjectAggregate
 
 
 def _has_delay_signal(project_status: str, issues: list[str]) -> bool:
@@ -44,16 +33,7 @@ def _has_delay_signal(project_status: str, issues: list[str]) -> bool:
 def _status_label(completion_rate: float, issue_count: int, has_delay: bool) -> str:
     if has_delay:
         return "RED"
-    if completion_rate < _COMPLETION_RATE_THRESHOLD or issue_count > 0:
-        return "YELLOW"
-    return "GREEN"
-
-
-def _determine_overall_status(status_counter: dict) -> str:
-    """RED > YELLOW > GREEN 우선순위로 전체 상태를 결정한다."""
-    if status_counter["RED"] > 0:
-        return "RED"
-    if status_counter["YELLOW"] > 0:
+    if completion_rate < 0.8 or issue_count > 0:
         return "YELLOW"
     return "GREEN"
 
@@ -67,6 +47,15 @@ def _impact_from_issue(text: str) -> str:
     return "QUALITY"
 
 
+def _format_validation_error(exc: ValidationError) -> str:
+    parts: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err.get("loc", []))
+        msg = err.get("msg", "invalid value")
+        parts.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(parts[:5])
+
+
 async def analyze_tool(
     aggregated_data_json: str = "",
     tool_context: ToolContext | None = None,
@@ -74,9 +63,14 @@ async def analyze_tool(
     """Generate executive analysis JSON from project aggregates."""
     aggregated_data: dict = {}
     if aggregated_data_json.strip():
-        aggregated_data, err = parse_json_dict(aggregated_data_json, "aggregated_data_json")
-        if err:
-            return err
+        try:
+            decoded = json.loads(aggregated_data_json)
+            if isinstance(decoded, dict):
+                aggregated_data = decoded
+            else:
+                return {"error": "aggregated_data_json은 JSON 객체여야 합니다."}
+        except Exception as exc:
+            return {"error": f"aggregated_data_json 파싱 실패: {exc}"}
     elif tool_context is not None:
         state_value = tool_context.state.get("aggregated_data")
         aggregated_data = state_value if isinstance(state_value, dict) else {}
@@ -122,6 +116,13 @@ async def analyze_tool(
             ),
             "diagnostics": diagnostics,
         }
+    try:
+        project_aggregates = [
+            ProjectAggregate.model_validate(project).model_dump(mode="json")
+            for project in project_aggregates
+        ]
+    except ValidationError as exc:
+        return {"error": f"분석 입력 검증 실패(ProjectAggregate): {_format_validation_error(exc)}"}
 
     projects: list[dict] = []
     issue_details: list[dict] = []
@@ -153,12 +154,12 @@ async def analyze_tool(
                     project_task_summaries.append(summary)
                 if task_status == "완료" and summary:
                     key_achievements.append(summary)
-            if len(key_achievements) >= _MAX_KEY_ACHIEVEMENTS:
+            if len(key_achievements) >= 3:
                 break
         if not key_achievements:
-            key_achievements = project_task_summaries[:_MAX_KEY_ACHIEVEMENTS] if project_task_summaries else ["작업 내용 없음"]
+            key_achievements = project_task_summaries[:3] if project_task_summaries else ["작업 내용 없음"]
 
-        key_issues = issues[:_MAX_KEY_ISSUES]
+        key_issues = issues[:3]
         if not key_issues:
             key_issues = ["주요 이슈 없음"]
 
@@ -214,8 +215,7 @@ async def analyze_tool(
                 "status": status,
                 "key_achievements": key_achievements[:3],
                 "key_issues": key_issues,
-                "change_vs_last_week": "UNCHANGED",
-                "next_week_plan": plans[:_MAX_KEY_ACHIEVEMENTS] if plans else (project_task_summaries[:_MAX_KEY_ACHIEVEMENTS] if project_task_summaries else []),
+                "next_week_plan": plans[:3] if plans else (project_task_summaries[:3] if project_task_summaries else []),
             }
         )
 
@@ -227,8 +227,19 @@ async def analyze_tool(
             seen.add(item)
             dedup_focus.append(item)
 
-    overall_status = _determine_overall_status(status_counter)
-    status_summary = _STATUS_SUMMARY_TEXT[overall_status]
+    overall_status = "GREEN"
+    if status_counter["RED"] > 0:
+        overall_status = "RED"
+    elif status_counter["YELLOW"] > 0:
+        overall_status = "YELLOW"
+
+    status_summary = (
+        "리스크 우선 대응이 필요한 프로젝트가 포함되어 있습니다."
+        if overall_status == "RED"
+        else "일부 이슈가 있어 모니터링이 필요합니다."
+        if overall_status == "YELLOW"
+        else "전반적으로 안정적인 진행 상태입니다."
+    )
 
     if not top_issues:
         top_issues = [
@@ -258,15 +269,20 @@ async def analyze_tool(
         "overall_status": overall_status,
         "executive_summary": {
             "status_summary": status_summary,
-            "top_issues": top_issues[:_MAX_TOP_ISSUES],
-            "decisions_needed": decisions_needed[:_MAX_DECISIONS_NEEDED],
+            "top_issues": top_issues[:10],
+            "decisions_needed": decisions_needed[:10],
         },
         "projects": projects,
         "issue_details": issue_details,
         "risks": risks,
-        "next_week_focus": dedup_focus[:_MAX_NEXT_WEEK_FOCUS],
+        "next_week_focus": dedup_focus[:20],
     }
+    try:
+        validated_result = AnalysisResult.model_validate(result).model_dump(mode="json")
+    except ValidationError as exc:
+        return {"error": f"분석 결과 검증 실패(AnalysisResult): {_format_validation_error(exc)}"}
+
     if tool_context is not None:
-        tool_context.state["analysis_result"] = result
-    return result
+        tool_context.state["analysis_result"] = validated_result
+    return validated_result
 

@@ -12,7 +12,7 @@ from .prompts import writer_agent_prompt
 from .tools import aggregate_tool
 from .tools import analyze_tool
 from .tools import parse_and_analyze_tool
-from .tools import render_pdf_function
+# from .tools import render_pdf_function
 from .tools import write_report_tool
 
 AGENT_GUARDRAIL_KWARGS = {
@@ -55,10 +55,10 @@ def _normalize_text(value: object) -> str:
         return " ".join(str(v) for v in value.values()).strip().lower()
     return str(value).strip().lower()
 
-def critic_router(ctx: Context, node_input: object) -> None:
-    """Emit PASS or RETRY route."""
-    normalized = _normalize_text(node_input)
-    ctx.route = "PASS" if "pass" in normalized else "RETRY"
+# def critic_router(ctx: Context, node_input: object) -> None:
+#     """Emit PASS or RETRY route."""
+#     normalized = _normalize_text(node_input)
+#     ctx.route = "PASS" if "pass" in normalized else "RETRY"
 
 
 def route_on_error(ctx: Context, node_input: object) -> None:
@@ -151,15 +151,15 @@ def writer_guard(ctx: Context, node_input: object) -> None:
     route_on_error(ctx, node_input)
 
 
-def critic_guard(ctx: Context, node_input: object) -> None:
-    """Critic 단계 PASS/RETRY 분기 + MAX_RETRY_COUNT 재시도 제한."""
-    normalized = _normalize_text(node_input)
-    if "retry" not in normalized:
-        ctx.state["critic_retry_count"] = 0
-        ctx.route = "PASS"
-        return
-
-    ctx.route = "RETRY" if _allow_retry(ctx, "critic_retry_count") else "ERROR"
+# def critic_guard(ctx: Context, node_input: object) -> None:
+#     """Critic 단계 PASS/RETRY 분기 + MAX_RETRY_COUNT 재시도 제한."""
+#     normalized = _normalize_text(node_input)
+#     if "retry" not in normalized:
+#         ctx.state["critic_retry_count"] = 0
+#         ctx.route = "PASS"
+#         return
+#
+#     ctx.route = "RETRY" if _allow_retry(ctx, "critic_retry_count") else "ERROR"
 
 # ══════════════════════════════════════════════════════════════
 #  intent router 에이전트 (의도파악 에이전트)
@@ -258,7 +258,7 @@ writer_agent = Agent(
     model=AGENT_MODEL,
     description=(
         "파이프라인 4단계. analyzer_agent의 분석 결과를 바탕으로 주간 업무 보고서 초안을 작성한다. "
-        "경영진이 바로 읽을 수 있는 수준의 마크다운 리포트를 생성하며, critic_agent의 검토 후 재작성될 수 있다."
+        "경영진이 바로 읽을 수 있는 수준의 마크다운 리포트를 생성하고 최종 PDF 단계로 전달한다."
     ),
     instruction=writer_agent_prompt,
     tools=[write_report_tool],
@@ -268,34 +268,34 @@ writer_agent = Agent(
 # ══════════════════════════════════════════════════════════════
 #  critic_agent 에이전트 ( 리포트 검토 에이전트)
 # ══════════════════════════════════════════════════════════════
-critic_agent = Agent(
-    name="critic_agent",
-    model=AGENT_MODEL,
-    description="""
-        파이프라인 5단계. writer_agent가 생성한 리포트 초안의 품질을 검토한다.
-        사실 일치성·완성도·논조를 기준으로 평가하고, 기준 통과 시 PASS, 재작성 필요 시 RETRY를 반환한다.
-        RETRY 판정 시 writer_agent가 재실행된다.
-    """,
-    instruction="""
-       아래 순서대로 리포트를 검토하고 판정 결과만 출력하라.
-
-        【Step 1 — 사실 일치성 검토】
-        리포트 서술이 분석 결과와 논리적으로 어긋나거나, 근거 없는 단정이 있으면 RETRY.
-
-        【Step 2 — 완성도 검토】
-        필수 섹션(요약, 프로젝트별 실적 및 작업 내역, 이슈, 다음 주 계획)이 모두 포함되어 있는지 확인한다.
-        섹션 누락 또는 내용이 현저히 부족하면 RETRY.
-
-        【Step 3 — 논조·가독성 검토】
-        경영진 보고서에 적합한 간결하고 객관적인 논조인지 확인한다.
-        과도한 구어체, 불명확한 표현, 오탈자가 있으면 RETRY.
-  
-        【Step 4 — 판정 출력】
-        판정 이유를 한 줄로 함께 출력하라.
-    """,
-    tools=[critic_router],
-    **AGENT_GUARDRAIL_KWARGS,
-)
+# critic_agent = Agent(
+#     name="critic_agent",
+#     model=AGENT_MODEL,
+#     description="""
+#         파이프라인 5단계. writer_agent가 생성한 리포트 초안의 품질을 검토한다.
+#         사실 일치성·완성도·논조를 기준으로 평가하고, 기준 통과 시 PASS, 재작성 필요 시 RETRY를 반환한다.
+#         RETRY 판정 시 writer_agent가 재실행된다.
+#     """,
+#     instruction="""
+#        아래 순서대로 리포트를 검토하고 판정 결과만 출력하라.
+#
+#         【Step 1 — 사실 일치성 검토】
+#         리포트 서술이 분석 결과와 논리적으로 어긋나거나, 근거 없는 단정이 있으면 RETRY.
+#
+#         【Step 2 — 완성도 검토】
+#         필수 섹션(요약, 프로젝트별 실적 및 작업 내역, 이슈, 다음 주 계획)이 모두 포함되어 있는지 확인한다.
+#         섹션 누락 또는 내용이 현저히 부족하면 RETRY.
+#
+#         【Step 3 — 논조·가독성 검토】
+#         경영진 보고서에 적합한 간결하고 객관적인 논조인지 확인한다.
+#         과도한 구어체, 불명확한 표현, 오탈자가 있으면 RETRY.
+#
+#         【Step 4 — 판정 출력】
+#         판정 이유를 한 줄로 함께 출력하라.
+#     """,
+#     tools=[critic_router],
+#     **AGENT_GUARDRAIL_KWARGS,
+# )
 
 # ══════════════════════════════════════════════════════════════
 #  final_report_agent 에이전트 ( 리포트 PDF 생성 및 최종응답 에이전트)
@@ -303,13 +303,12 @@ critic_agent = Agent(
 final_report_agent = Agent(
     name="final_report_agent",
     model=AGENT_MODEL,
-    description="마크다운 형식의 보고서를 PDF 파일로 변환하는 에이전트.",
+    description="PDF 변환 없이 마크다운 보고서를 최종 반환하는 종단 에이전트.",
     instruction=(
-        "사용자에게 마크다운 내용을 다시 요청하지 말고 즉시 render_pdf_function을 호출하라.\n"
-        "markdown 인자가 비어 있으면 tool_context.state의 markdown_report/final_report를 사용한다.\n"
-        "성공 시 pdf_path를 포함한 결과만 간결하게 반환하라."
+        "render_pdf_function을 사용하지 않는다.\n"
+        "tool_context.state의 markdown_report를 확인하고, 있으면 그대로 최종 응답으로 반환하라.\n"
+        "없으면 현재까지 생성된 보고서 본문을 간결히 반환하라."
     ),
-    tools=[render_pdf_function],
     **AGENT_GUARDRAIL_KWARGS,
 )
 
@@ -350,13 +349,13 @@ weekly_report_workflow = Workflow(
         (
             writer_agent,
             writer_guard,
-            {"NEXT": critic_agent, "RETRY": writer_agent, "ERROR": error_agent},
+            {"NEXT": final_report_agent, "ERROR": error_agent},
         ),
-        (
-            critic_agent,
-            critic_guard,
-            {"PASS": final_report_agent, "RETRY": writer_agent, "ERROR": error_agent},
-        ),
+        # (
+        #     critic_agent,
+        #     critic_guard,
+        #     {"PASS": final_report_agent, "RETRY": writer_agent, "ERROR": error_agent},
+        # ),
     ],
 )
 

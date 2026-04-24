@@ -6,8 +6,11 @@ from collections import defaultdict
 import re
 
 from google.adk.tools.tool_context import ToolContext
+from pydantic import ValidationError
 
 from ._utils import load_json_records
+from ..schemas.model import ProjectAggregate
+from ..schemas.model import TaskItem
 
 
 def _status_emoji(items: list[dict]) -> str:
@@ -46,6 +49,15 @@ _PROJECT_STOPWORDS = {
     "작성",
     "세션",
 }
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    parts: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err.get("loc", []))
+        msg = err.get("msg", "invalid value")
+        parts.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(parts[:5])
 
 
 def _project_tokens(name: str) -> list[str]:
@@ -148,6 +160,10 @@ async def aggregate_tool(
 
     if not records:
         return {"error": "파싱된 레코드가 없어 취합을 수행할 수 없습니다."}
+    try:
+        records = [TaskItem.model_validate(record).model_dump(mode="json") for record in records]
+    except ValidationError as exc:
+        return {"error": f"입력 레코드 검증 실패(TaskItem): {_format_validation_error(exc)}"}
 
     project_names = [str(r.get("project_name") or "").strip() for r in records if str(r.get("project_name") or "").strip()]
     alias_map = _build_project_alias_map(project_names)
@@ -259,6 +275,15 @@ async def aggregate_tool(
         "project_aggregates": aggregates,
         "company_groups": company_groups,
     }
+    try:
+        validated_aggregates = [
+            ProjectAggregate.model_validate(aggregate).model_dump(mode="json")
+            for aggregate in aggregates
+        ]
+        result["project_aggregates"] = validated_aggregates
+    except ValidationError as exc:
+        return {"error": f"취합 결과 검증 실패(ProjectAggregate): {_format_validation_error(exc)}"}
+
     if tool_context is not None:
         tool_context.state["aggregated_data"] = result
     return result
