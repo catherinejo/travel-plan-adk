@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "weekly_project_report_adk"
+name = "weekly_review_report_adk"
 version = "0.1.0"
 description = "Hand-coded ADK 2.0 style framework MVP"
 requires-python = ">=3.11"

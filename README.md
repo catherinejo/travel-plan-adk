@@ -1,9 +1,9 @@
-# weekly_review ADK — 주간 업무 보고서 자동화 파이프라인
+# weekly_review_report_adk — 주간 업무 보고서 자동화 파이프라인
 
 Google ADK 2.0 기반 멀티 에이전트 파이프라인.  
 센터별 엑셀 파일을 업로드하면 파싱 → 취합 → 분석 → 보고서 작성까지 자동으로 처리합니다.
 
-[![CI](https://github.com/catherinejo/travel-plan-adk/actions/workflows/ci.yml/badge.svg)](https://github.com/catherinejo/travel-plan-adk/actions/workflows/ci.yml)
+[![CI](https://github.com/catherinejo/weekly-review-report-adk/actions/workflows/ci.yml/badge.svg)](https://github.com/catherinejo/weekly-review-report-adk/actions/workflows/ci.yml)
 
 ---
 
@@ -52,8 +52,8 @@ intent_router          ← REPORT / GENERAL 분류
 ### 설치
 
 ```bash
-git clone https://github.com/catherinejo/travel-plan-adk.git
-cd travel-plan-adk
+git clone https://github.com/catherinejo/weekly-review-report-adk.git
+cd weekly-review-report-adk
 
 cp .env.example .env
 # .env에 GOOGLE_API_KEY 입력
@@ -105,7 +105,7 @@ uv run adk web
 ## 프로젝트 구조
 
 ```
-travel-plan-adk/
+weekly-review-report-adk/
 ├── src/weekly_project_report/
 │   ├── core/
 │   │   ├── _utils.py          # 공통 JSON 파싱 유틸리티

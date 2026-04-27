@@ -3212,7 +3212,7 @@ wheels = [
 ]
 
 [[package]]
-name = "weekly-project-report-adk"
+name = "weekly-review-report-adk"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
