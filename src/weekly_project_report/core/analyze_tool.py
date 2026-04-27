@@ -11,6 +11,22 @@ from pydantic import ValidationError
 from ..schemas.model import AnalysisResult
 from ..schemas.model import ProjectAggregate
 
+_COMPLETION_RATE_THRESHOLD = 0.8
+_STATUS_SUMMARY_TEXT = {
+    "RED": "리스크 우선 대응이 필요한 프로젝트가 포함되어 있습니다.",
+    "YELLOW": "일부 이슈가 있어 모니터링이 필요합니다.",
+    "GREEN": "전반적으로 안정적인 진행 상태입니다.",
+}
+
+
+def _determine_overall_status(status_counter: dict) -> str:
+    """RED > YELLOW > GREEN 우선순위로 전체 상태를 결정한다."""
+    if status_counter.get("RED", 0) > 0:
+        return "RED"
+    if status_counter.get("YELLOW", 0) > 0:
+        return "YELLOW"
+    return "GREEN"
+
 
 def _has_delay_signal(project_status: str, issues: list[str]) -> bool:
     """RED는 '지연' 신호가 있을 때만 부여한다."""
@@ -33,7 +49,7 @@ def _has_delay_signal(project_status: str, issues: list[str]) -> bool:
 def _status_label(completion_rate: float, issue_count: int, has_delay: bool) -> str:
     if has_delay:
         return "RED"
-    if completion_rate < 0.8 or issue_count > 0:
+    if completion_rate < _COMPLETION_RATE_THRESHOLD or issue_count > 0:
         return "YELLOW"
     return "GREEN"
 
@@ -227,19 +243,8 @@ async def analyze_tool(
             seen.add(item)
             dedup_focus.append(item)
 
-    overall_status = "GREEN"
-    if status_counter["RED"] > 0:
-        overall_status = "RED"
-    elif status_counter["YELLOW"] > 0:
-        overall_status = "YELLOW"
-
-    status_summary = (
-        "리스크 우선 대응이 필요한 프로젝트가 포함되어 있습니다."
-        if overall_status == "RED"
-        else "일부 이슈가 있어 모니터링이 필요합니다."
-        if overall_status == "YELLOW"
-        else "전반적으로 안정적인 진행 상태입니다."
-    )
+    overall_status = _determine_overall_status(status_counter)
+    status_summary = _STATUS_SUMMARY_TEXT[overall_status]
 
     if not top_issues:
         top_issues = [
