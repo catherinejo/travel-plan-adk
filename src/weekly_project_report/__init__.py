@@ -1,4 +1,4 @@
-"""travel_plan 패키지."""
+"""weekly_project_report 패키지."""
 
 from .root import app
 from .root import root_agent

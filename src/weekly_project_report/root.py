@@ -11,14 +11,14 @@ from .monitoring import setup_telemetry
 _ENABLE_TELEMETRY = os.getenv("TRAVEL_PLAN_ENABLE_TELEMETRY", "false").lower() == "true"
 _TELEMETRY_ENDPOINT = os.getenv("TRAVEL_PLAN_OTLP_ENDPOINT", "http://localhost:4317")
 telemetry = setup_telemetry(
-    service_name="travel_plan",
+    service_name="weekly_project_report",
     otlp_endpoint=_TELEMETRY_ENDPOINT,
     enable_traces=_ENABLE_TELEMETRY,
     enable_metrics=_ENABLE_TELEMETRY,
 )
 
 app = App(
-    name="travel_plan",
+    name="weekly_project_report",
     root_agent=root_agent,
     plugins=[
         # 업로드 파일을 artifact로 저장하고, user message에는 파일 참조 텍스트만 남긴다.

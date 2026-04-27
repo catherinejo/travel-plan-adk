@@ -36,7 +36,7 @@ case "$MODE" in
     echo "────────────────────────────────────────"
     echo " ADK Web UI 시작"
     echo " URL: http://localhost:${PORT}"
-    echo " 에이전트: travel_plan"
+    echo " 에이전트: weekly_project_report"
     echo " 종료: Ctrl+C"
     echo "────────────────────────────────────────"
     uv run adk web "$AGENTS_DIR" --port "$PORT"
@@ -46,7 +46,7 @@ case "$MODE" in
     echo " ADK CLI 대화 모드"
     echo " 종료: exit 또는 Ctrl+C"
     echo "────────────────────────────────────────"
-    uv run adk run "$AGENTS_DIR/travel_plan"
+    uv run adk run "$AGENTS_DIR/weekly_project_report"
     ;;
   api)
     echo "────────────────────────────────────────"

@@ -88,7 +88,6 @@ analysis_result_json = """
       "key_issues": [
         "string"
       ],
-      "change_vs_last_week": "IMPROVED | DEGRADED | NEW_ISSUE | UNCHANGED",
       "next_week_plan": [
         "string"
       ]
@@ -255,7 +254,6 @@ analyzer_agent_prompt = """
     - next_week_focus는 도구 결과를 그대로 사용한다. 항목 추가/삭제/병합/의미 변경은 금지한다.
     - next_week_focus는 문장 끝 서술어만 표준화할 수 있다(예: '~함' -> '~합니다.'). 핵심 내용 단어는 바꾸지 않는다.
     - 열거형 값(GREEN/YELLOW/RED, IMPROVED/DEGRADED/NEW_ISSUE/UNCHANGED, impact, current_state 등)은 스키마에 정의된 값만 사용한다.
-    - 전주 비교 데이터가 없으면 change_vs_last_week는 UNCHANGED로 유지한다.
 
     【Step 3 — 최종 출력】
     - 출력은 아래 JSON 스키마와 동일한 키를 갖는 단일 JSON 객체 한 개만 허용한다. 설명문·코드펜스·주석 금지.
@@ -282,7 +280,7 @@ writer_agent_prompt = """
 
     【Step 2 — 마크다운 정리】
     - write_report_tool 결과의 markdown_report를 기반으로 문장만 다듬는다.
-    - 섹션 구조(요약, 프로젝트별 주간 실적, 주요 이슈 및 리스크, 다음 주 계획 및 권고 사항)는 유지한다.
+    - 섹션 구조(요약, 프로젝트별 주간 실적 및 작업 내역, 주요 이슈 및 리스크, 다음 주 계획 및 권고 사항)는 유지한다.
     - 근거 없는 수치/판단 추가 금지, 입력 데이터 범위 내에서만 정리한다.
 
     【Step 3 — 출력 형식】

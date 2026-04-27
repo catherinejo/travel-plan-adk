@@ -106,7 +106,7 @@ uv run adk web
 
 ```
 travel-plan-adk/
-├── src/travel_plan/
+├── src/weekly_project_report/
 │   ├── core/
 │   │   ├── _utils.py          # 공통 JSON 파싱 유틸리티
 │   │   ├── agent.py           # 에이전트 & 워크플로 정의

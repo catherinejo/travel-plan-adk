@@ -1,7 +1,7 @@
 """Tests for core/parse_tool.py — Excel 파싱 순수 함수."""
 
 import pytest
-from travel_plan.core.parse_tool import (
+from weekly_project_report.core.parse_tool import (
     _build_column_map,
     _extract_member_names,
     _is_member_name,

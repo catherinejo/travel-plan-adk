@@ -1,4 +1,4 @@
-"""travel_plan 파이프라인 전용 도구 모음(호환 import용)."""
+"""weekly_project_report 파이프라인 전용 도구 모음(호환 import용)."""
 
 from .aggregate_tool import aggregate_tool
 from .analyze_tool import analyze_tool

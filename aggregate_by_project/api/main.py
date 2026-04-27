@@ -15,7 +15,7 @@ from fastapi import UploadFile
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 
-from travel_plan.core.report_tool import render_pdf_function
+from weekly_project_report.core.report_tool import render_pdf_function
 
 Stage = Literal["queued", "parsing", "mapping", "reporting", "rendering", "done", "failed"]
 

@@ -1,6 +1,6 @@
 """Tests for core/_utils.py — JSON 파싱 유틸리티."""
 
-from travel_plan.core._utils import load_json_records, parse_json_dict
+from weekly_project_report.core._utils import load_json_records, parse_json_dict
 
 
 class TestParseJsonDict:

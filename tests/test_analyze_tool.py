@@ -1,7 +1,7 @@
 """Tests for core/analyze_tool.py — 분석 순수 함수."""
 
 import pytest
-from travel_plan.core.analyze_tool import (
+from weekly_project_report.core.analyze_tool import (
     _COMPLETION_RATE_THRESHOLD,
     _STATUS_SUMMARY_TEXT,
     _determine_overall_status,

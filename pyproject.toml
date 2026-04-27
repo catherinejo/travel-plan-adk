@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "travel_plan_adk"
+name = "weekly_project_report_adk"
 version = "0.1.0"
 description = "Hand-coded ADK 2.0 style framework MVP"
 requires-python = ">=3.11"
@@ -55,4 +55,4 @@ warn_return_any = true
 warn_unused_configs = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/travel_plan"]
+packages = ["src/weekly_project_report"]

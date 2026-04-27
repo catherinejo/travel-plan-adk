@@ -1,6 +1,6 @@
 """Tests for core/aggregate_tool.py — 취합 순수 함수."""
 
-from travel_plan.core.aggregate_tool import (
+from weekly_project_report.core.aggregate_tool import (
     _build_project_alias_map,
     _name_similarity,
     _project_tokens,
