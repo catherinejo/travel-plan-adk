@@ -35,7 +35,7 @@ from threading import Lock
 
 logger = logging.getLogger("adk2_labs.monitoring")
 _DB_LOCK = Lock()
-_MONITOR_DB_PATH = Path(os.getenv("TRAVEL_PLAN_MONITOR_DB", "src/.adk/monitoring.db"))
+_MONITOR_DB_PATH = Path(os.getenv("WEEKLY_PROJECT_REPORT_MONITOR_DB", "src/.adk/monitoring.db"))
 
 
 def _init_monitor_db() -> None:

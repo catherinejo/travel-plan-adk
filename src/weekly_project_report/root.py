@@ -8,8 +8,8 @@ from .core.agent import root_agent
 from .monitoring import get_monitoring_summary
 from .monitoring import setup_telemetry
 
-_ENABLE_TELEMETRY = os.getenv("TRAVEL_PLAN_ENABLE_TELEMETRY", "false").lower() == "true"
-_TELEMETRY_ENDPOINT = os.getenv("TRAVEL_PLAN_OTLP_ENDPOINT", "http://localhost:4317")
+_ENABLE_TELEMETRY = os.getenv("WEEKLY_PROJECT_REPORT_ENABLE_TELEMETRY", "false").lower() == "true"
+_TELEMETRY_ENDPOINT = os.getenv("WEEKLY_PROJECT_REPORT_OTLP_ENDPOINT", "http://localhost:4317")
 telemetry = setup_telemetry(
     service_name="weekly_project_report",
     otlp_endpoint=_TELEMETRY_ENDPOINT,

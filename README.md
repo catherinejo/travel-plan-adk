@@ -144,7 +144,7 @@ weekly-review-report-adk/
 | 변수 | 필수 | 기본값 | 설명 |
 |---|---|---|---|
 | `GOOGLE_API_KEY` | ✅ | — | Google Gemini API Key |
-| `TRAVEL_PLAN_AGENT_MODEL` | — | `gemini-2.5-flash` | 사용할 모델 |
+| ` WEEKLY_PROJECT_REPORT_AGENT_MODEL` | — | `gemini-2.5-flash` | 사용할 모델 |
 
 ---
 
