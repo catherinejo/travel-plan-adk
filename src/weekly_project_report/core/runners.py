@@ -33,7 +33,6 @@ from google.adk.artifacts import artifact_util
 from google.genai import types
 
 from .agents.base_agent import BaseAgent
-from .agents.base_agent import BaseAgentState
 from .agents.context_cache_config import ContextCacheConfig
 from .agents.invocation_context import InvocationContext
 from .agents.invocation_context import new_invocation_context_id
@@ -544,7 +543,7 @@ class Runner:
         invocation_id: Optional[str] = None,
     ) -> AsyncGenerator[Event, None]:
       cm = tracer.start_as_current_span('invocation')
-      span = cm.__enter__()
+      cm.__enter__()
       try:
         session = await self._get_or_create_session(
             user_id=user_id,
