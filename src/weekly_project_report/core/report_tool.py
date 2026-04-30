@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,9 +13,18 @@ from google.adk.tools.tool_context import ToolContext
 from ._utils import parse_json_dict
 
 _TRUNCATE_MAX_LEN = 120
+_TRUNCATE_TASK_LEN = 150        # 작업 내용 셀 최대 길이
 _MAX_TASK_ITEMS = 5
 _MAX_SUMMARY_WEEKLY_CHANGES = 2
 _MAX_PLAN_ITEMS_PER_PROJECT = 1
+
+# 상태 정렬 순서: 완료 → 진행 → 예정 → 지연 → 기타
+_TASK_STATUS_ORDER: dict[str, int] = {
+    "완료": 0,
+    "진행": 1, "진행중": 1, "진행 중": 1,
+    "예정": 2,
+    "지연": 3,
+}
 
 
 def _truncate_note(text: str, max_len: int = _TRUNCATE_MAX_LEN) -> str:
@@ -24,25 +34,28 @@ def _truncate_note(text: str, max_len: int = _TRUNCATE_MAX_LEN) -> str:
     return t[: max_len - 1] + "…"
 
 
-def _build_project_table(project_aggregates: list[dict]) -> str:
-    summary_lines = [
-        "| 프로젝트 | 상태 | 진행 요지 |",
-        "|---|---|---|",
-    ]
-    detail_lines = ["", "### 프로젝트별 작업 리스트"]
+def _md_cell(text: object, max_len: int = _TRUNCATE_TASK_LEN) -> str:
+    """마크다운 테이블 셀에 안전한 문자열로 변환한다."""
+    s = str(text or "-").replace("\n", " ").replace("|", "\\|").strip()
+    if not s:
+        return "-"
+    if len(s) > max_len:
+        s = s[: max_len - 1] + "…"
+    return s
 
-    for p in project_aggregates:
+
+def _build_project_table(project_aggregates: list[dict]) -> str:
+    """프로젝트별로 섹션을 나눠 작업 내역 테이블을 생성한다."""
+    if not project_aggregates:
+        return "| 구분 | 작업 내용 |\n|---|---|\n"
+
+    sections: list[str] = []
+
+    for idx, p in enumerate(project_aggregates, start=1):
         name = str(p.get("project_name") or "-")
-        status = str(p.get("status") or "-")
-        issues = p.get("issues") or []
-        plans = p.get("next_week_plans") or []
-        parts: list[str] = []
-        if issues:
-            parts.append("이슈: " + _truncate_note("; ".join(str(x) for x in issues[:3])))
-        if plans:
-            parts.append("다음 주: " + _truncate_note("; ".join(str(x) for x in plans[:2])))
-        narrative = " / ".join(parts) if parts else "특이사항 없음"
-        summary_lines.append(f"| {name} | {status} | {narrative} |")
+        status_icon = str(p.get("status") or "").strip()
+        issues = [str(i).strip() for i in (p.get("issues") or []) if str(i).strip()]
+        next_plans = [str(pl).strip() for pl in (p.get("next_week_plans") or []) if str(pl).strip()]
 
         tasks: list[dict] = []
         for group in p.get("groups") or []:
@@ -50,32 +63,40 @@ def _build_project_table(project_aggregates: list[dict]) -> str:
                 if isinstance(task, dict):
                     tasks.append(task)
 
-        detail_lines.append(f"- {name}")
+        lines: list[str] = []
+        header = f"### {idx}. {name}"
+        if status_icon:
+            header += f"  {status_icon}"
+        lines.append(header)
+        lines.append("")
+        lines.append("| 구분 | 작업 내용 |")
+        lines.append("|---|---|")
+
         if not tasks:
-            detail_lines.append("  - 작업 내역 없음")
-            continue
+            lines.append("| - | 작업 내역 없음 |")
+        else:
+            sorted_tasks = sorted(
+                tasks,
+                key=lambda t: _TASK_STATUS_ORDER.get(
+                    str(t.get("status") or "").strip(), 99
+                ),
+            )
+            for task in sorted_tasks:
+                t_status = str(task.get("status") or "-").strip()
+                summary = _md_cell(task.get("summary"))
+                lines.append(f"| {t_status} | {summary} |")
 
-        completed = [str(t.get("summary") or "").strip() for t in tasks if str(t.get("status") or "").strip() == "완료"]
-        in_progress = [str(t.get("summary") or "").strip() for t in tasks if str(t.get("status") or "").strip() in {"진행", "진행중", "진행 중"}]
+        if issues:
+            issue_text = _md_cell("; ".join(issues[:3]), max_len=200)
+            lines.append(f"\n> **이슈**: {issue_text}")
 
-        if completed:
-            detail_lines.append("  - 완료 작업")
-            for item in completed[:_MAX_TASK_ITEMS]:
-                if item:
-                    detail_lines.append(f"    - {item}")
-        if in_progress:
-            detail_lines.append("  - 진행 작업")
-            for item in in_progress[:_MAX_TASK_ITEMS]:
-                if item:
-                    detail_lines.append(f"    - {item}")
+        if next_plans:
+            plan_text = _md_cell("; ".join(next_plans[:2]), max_len=200)
+            lines.append(f"> **다음 주**: {plan_text}")
 
-        if not completed and not in_progress:
-            for task in tasks[:_MAX_TASK_ITEMS]:
-                summary = str(task.get("summary") or "").strip()
-                if summary:
-                    detail_lines.append(f"  - {summary}")
+        sections.append("\n".join(lines))
 
-    return "\n".join(summary_lines + detail_lines)
+    return "\n\n---\n\n".join(sections)
 
 
 async def write_report_tool(
@@ -106,6 +127,24 @@ async def write_report_tool(
         aggregated_data = value if isinstance(value, dict) else {}
 
     project_aggregates = aggregated_data.get("project_aggregates") or []
+    if not project_aggregates and tool_context is not None:
+        # self-heal: aggregate 단계 state 누락 시 parsed_records로 재취합 시도
+        parsed = tool_context.state.get("parsed_records") or {}
+        records = parsed.get("records") if isinstance(parsed, dict) else None
+        if isinstance(records, list) and records:
+            try:
+                from .aggregate_tool import aggregate_tool
+
+                reaggregated = await aggregate_tool(
+                    records_json=json.dumps({"records": records}, ensure_ascii=False),
+                    tool_context=tool_context,
+                )
+                if isinstance(reaggregated, dict):
+                    aggregated_data = reaggregated
+                    project_aggregates = aggregated_data.get("project_aggregates") or []
+            except Exception:
+                project_aggregates = []
+
     if not project_aggregates:
         diagnostics = {
             "has_analysis_result_json_arg": bool(analysis_result_json.strip()),
@@ -163,30 +202,29 @@ async def write_report_tool(
     if not summary_lines:
         summary_lines = ["핵심 요약 데이터가 없습니다."]
 
-    risk_lines: list[str] = []
+    risk_rows: list[tuple[str, str, str]] = []
     for risk in risks:
         if not isinstance(risk, dict):
             continue
         risk_text = str(risk.get("risk") or "").strip()
         mitigation = str(risk.get("mitigation") or "").strip()
-        if risk_text and mitigation:
-            risk_lines.append(f"- {risk_text} / 대응: {mitigation}")
-        elif risk_text:
-            risk_lines.append(f"- {risk_text}")
-    if not risk_lines:
+        status = str(risk.get("status") or "").strip()
+        if risk_text:
+            risk_rows.append((risk_text, mitigation or "-", status or "-"))
+    if not risk_rows:
         for risk in risk_projects:
             if not isinstance(risk, dict):
                 continue
             pname = str(risk.get("project_name") or "-")
             reason = str(risk.get("risk_reason") or "리스크 요인 확인 필요")
-            risk_lines.append(f"- {pname}: {reason}")
-    if not risk_lines:
-        risk_lines = ["- 주요 리스크 없음"]
+            risk_rows.append((f"{pname}: {reason}", "-", "-"))
+    if not risk_rows:
+        risk_rows = [("주요 리스크 없음", "-", "-")]
 
-    recommendation_lines = [f"- {line}" for line in next_week_focus if str(line).strip()]
-    if not recommendation_lines and recommendations:
-        recommendation_lines = [f"- {line}" for line in recommendations if str(line).strip()]
-    if not recommendation_lines and projects_from_analysis:
+    recommendation_rows = [str(line).strip() for line in next_week_focus if str(line).strip()]
+    if not recommendation_rows and recommendations:
+        recommendation_rows = [str(line).strip() for line in recommendations if str(line).strip()]
+    if not recommendation_rows and projects_from_analysis:
         for p in projects_from_analysis[:3]:
             if not isinstance(p, dict):
                 continue
@@ -194,20 +232,34 @@ async def write_report_tool(
             plan_list = raw_plan_list if isinstance(raw_plan_list, list) else []
             for plan in plan_list[:_MAX_PLAN_ITEMS_PER_PROJECT]:
                 if str(plan).strip():
-                    recommendation_lines.append(f"- {plan}")
-    if not recommendation_lines:
-        recommendation_lines = ["- 권고 사항 없음"]
+                    recommendation_rows.append(str(plan).strip())
+    if not recommendation_rows:
+        recommendation_rows = ["권고 사항 없음"]
+
+    summary_table = ["| 항목 | 내용 |", "|---|---|"]
+    for idx, line in enumerate(summary_lines, start=1):
+        summary_table.append(f"| 요약 {idx} | {_md_cell(line)} |")
+
+    risk_table = ["| 리스크 | 대응 방안 | 상태 |", "|---|---|---|"]
+    for risk_text, mitigation, status in risk_rows:
+        risk_table.append(
+            f"| {_md_cell(risk_text)} | {_md_cell(mitigation)} | {_md_cell(status)} |"
+        )
+
+    plan_table = ["| No | 다음 주 계획/권고 |", "|---|---|"]
+    for idx, line in enumerate(recommendation_rows, start=1):
+        plan_table.append(f"| {idx} | {_md_cell(line)} |")
 
     markdown_report = (
         "# 주간 프로젝트 보고서\n\n"
         "## 1. 요약 (Executive Summary)\n"
-        + "\n".join(f"- {line}" for line in summary_lines)
+        + "\n".join(summary_table)
         + "\n\n## 2. 프로젝트별 주간 실적 및 작업 내역\n"
         + _build_project_table(project_aggregates)
         + "\n\n## 3. 주요 이슈 및 리스크\n"
-        + "\n".join(risk_lines)
+        + "\n".join(risk_table)
         + "\n\n## 4. 다음 주 계획 및 권고 사항\n"
-        + "\n".join(recommendation_lines)
+        + "\n".join(plan_table)
         + "\n"
     )
 

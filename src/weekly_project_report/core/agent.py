@@ -12,7 +12,6 @@ from .prompts import writer_agent_prompt
 from .tools import aggregate_tool
 from .tools import analyze_tool
 from .tools import parse_and_analyze_tool
-# from .tools import render_pdf_function
 from .tools import write_report_tool
 
 AGENT_GUARDRAIL_KWARGS = {
@@ -75,16 +74,22 @@ def _extract_error_message(node_input: object) -> str | None:
         error_value = node_input.get("error")
         if isinstance(error_value, str) and error_value.strip():
             return error_value.strip()
+    # 비정형 텍스트의 단순 키워드(예: "오류 대응", "실패 사례")는 업무 문맥일 수 있어
+    # 에러로 오탐될 가능성이 높다. 따라서 dict["error"] 외에는
+    # 명시적인 시스템 에러 포맷에서만 에러로 판정한다.
     normalized = _normalize_text(node_input)
-    error_hints = (
-        "error",
-        "오류",
-        "실패",
-        "누락",
-        "찾을 수 없습니다",
-        "지원하지 않는 파일 형식",
+    system_error_prefixes = (
+        "error:",
+        "오류:",
+        "exception:",
+        "traceback",
+        "validationerror",
+        "valueerror:",
+        "typeerror:",
+        "keyerror:",
+        "module not found",
     )
-    if any(hint in normalized for hint in error_hints):
+    if normalized.startswith(system_error_prefixes):
         return normalized
     return None
 
@@ -256,10 +261,10 @@ analyzer_agent = Agent(
 writer_agent = Agent(
     name="writer_agent",
     model=AGENT_MODEL,
-    description=(
-        "파이프라인 4단계. analyzer_agent의 분석 결과를 바탕으로 주간 업무 보고서 초안을 작성한다. "
-        "경영진이 바로 읽을 수 있는 수준의 마크다운 리포트를 생성하고 최종 PDF 단계로 전달한다."
-    ),
+    description="""
+        파이프라인 4단계. analyzer_agent의 분석 결과를 바탕으로 주간 업무 보고서 초안을 작성한다.
+        경영진이 바로 읽을 수 있는 수준의 마크다운 리포트를 생성하고 최종 PDF 단계로 전달한다.
+    """,
     instruction=writer_agent_prompt,
     tools=[write_report_tool],
     **AGENT_GUARDRAIL_KWARGS,
@@ -356,6 +361,7 @@ weekly_report_workflow = Workflow(
         #     critic_guard,
         #     {"PASS": final_report_agent, "RETRY": writer_agent, "ERROR": error_agent},
         # ),
+        (final_report_agent,),
     ],
 )
 

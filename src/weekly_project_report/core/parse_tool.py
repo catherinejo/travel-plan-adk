@@ -12,6 +12,7 @@ from typing import Any
 from google.adk.tools.tool_context import ToolContext
 from pydantic import ValidationError
 
+from ._utils import _format_validation_error
 from ..schemas.model import TaskItem
 
 _SUPPORTED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm"}
@@ -37,15 +38,6 @@ _NAME_STOPWORDS = {
     "프로젝트",
     "구축",
 }
-
-
-def _format_validation_error(exc: ValidationError) -> str:
-    parts: list[str] = []
-    for err in exc.errors():
-        loc = ".".join(str(x) for x in err.get("loc", []))
-        msg = err.get("msg", "invalid value")
-        parts.append(f"{loc}: {msg}" if loc else msg)
-    return "; ".join(parts[:5])
 
 
 def _extract_inline_bytes(raw_data: Any) -> bytes | None:
@@ -821,51 +813,41 @@ def _parse_hierarchical_rows(ws: Any, inferred_center: str) -> tuple[list[dict],
     return records, anomalies
 
 
-async def parse_and_analyze_tool(
-    file_path: str = "",
-    tool_context: ToolContext | None = None,
-) -> dict:
-    """Parse uploaded Excel and convert to normalized task records."""
-    if tool_context is None:
-        return {"error": "tool_context가 없어 파일을 처리할 수 없습니다."}
+def _parse_excel_file(resolved_path: str) -> dict:
+    """Excel 파일을 파싱하여 정규화된 레코드를 반환한다.
 
+    아티팩트 해소나 state 저장 없이 순수하게 파일만 파싱한다.
+    fanout.py의 병렬 파싱 워커에서 재사용된다.
+
+    Args:
+        resolved_path: 파싱할 Excel 파일의 절대 경로.
+
+    Returns:
+        성공 시 ``{"records": [...], "total_count": int, "anomalies": [...]}``,
+        실패 시 ``{"error": "..."}``
+    """
     try:
         import openpyxl
     except ImportError:
         return {"error": "openpyxl이 설치되지 않았습니다. `uv add openpyxl` 후 재시도하세요."}
 
-    resolved_path = file_path.strip()
-    # LLM/tool 호출 시 경로가 따옴표 또는 file:// 형태로 들어오는 경우를 정리한다.
-    if resolved_path.startswith(("\"", "'")) and resolved_path.endswith(("\"", "'")) and len(resolved_path) >= 2:
-        resolved_path = resolved_path[1:-1].strip()
-    if resolved_path.startswith("file://"):
-        resolved_path = resolved_path[7:]
-    resolved_path = resolved_path.replace("\u00a0", " ").strip()
-
-    artifact_name: str | None = None
-    if not resolved_path:
-        resolved_path, artifact_name = await _resolve_excel_path_from_artifact(tool_context)
-        if not resolved_path:
-            return {
-                "error": (
-                    "분석할 파일이 없습니다. UI에서 엑셀 파일을 첨부한 뒤 다시 요청하거나 "
-                    "`file_path` 인자를 전달하세요."
-                )
-            }
-
     path = Path(resolved_path).expanduser()
     if not path.exists() and resolved_path:
-        # 절대경로 전달 실패 시 파일명 기준으로 uploads/Downloads를 보조 탐색한다.
+        # 절대경로 전달 실패 시 파일명 기준으로 uploads/다운로드 디렉토리를 보조 탐색한다.
+        import os as _os
         basename = path.name
-        fallback_candidates = []
+        fallback_candidates: list[Path] = []
         if basename:
-            fallback_candidates.extend(sorted(Path("uploads").glob(f"*{basename}*"), key=lambda p: p.stat().st_mtime, reverse=True))
             fallback_candidates.extend(
-                sorted(Path("/Users/yhcho/Downloads").glob(f"*{basename}*"), key=lambda p: p.stat().st_mtime, reverse=True)
+                sorted(Path("uploads").glob(f"*{basename}*"), key=lambda p: p.stat().st_mtime, reverse=True)
             )
+            downloads_dir = Path(_os.getenv("EXCEL_FALLBACK_DIR", str(Path.home() / "Downloads")))
+            if downloads_dir.exists():
+                fallback_candidates.extend(
+                    sorted(downloads_dir.glob(f"*{basename}*"), key=lambda p: p.stat().st_mtime, reverse=True)
+                )
         if fallback_candidates:
             path = fallback_candidates[0]
-            resolved_path = str(path)
 
     if not path.exists():
         return {"error": f"파일을 찾을 수 없습니다: {resolved_path}"}
@@ -904,13 +886,16 @@ async def parse_and_analyze_tool(
                 if record:
                     header_records.append(record)
                 else:
-                    header_anomalies.append({"row": row_idx, "error": "필수 필드(project/status/summary/center/member) 누락"})
+                    header_anomalies.append(
+                        {"row": row_idx, "error": "필수 필드(project/status/summary/center/member) 누락"}
+                    )
             except Exception as exc:
                 header_anomalies.append({"row": row_idx, "error": str(exc)})
 
     # 비정형(헤더 누락) 파일에서는 member 헤더 매핑 오탐이 커서 identity 보정을 비활성화한다.
     if missing:
-        identity_map, identity_anomalies = {}, []
+        identity_map: dict[int, dict[str, str]] = {}
+        identity_anomalies: list[dict] = []
     else:
         identity_map, identity_anomalies = _collect_header_identity_map(ws, headers, col_map)
     hierarchical_records, hierarchical_anomalies = _parse_hierarchical_rows(ws, inferred_center)
@@ -964,9 +949,50 @@ async def parse_and_analyze_tool(
             "anomalies": anomalies[:20],
         }
 
+    return result
+
+
+async def parse_and_analyze_tool(
+    file_path: str = "",
+    tool_context: ToolContext | None = None,
+) -> dict:
+    """Parse uploaded Excel and convert to normalized task records."""
+    if tool_context is None:
+        return {"error": "tool_context가 없어 파일을 처리할 수 없습니다."}
+
+    resolved_path = file_path.strip()
+    # LLM/tool 호출 시 경로가 따옴표 또는 file:// 형태로 들어오는 경우를 정리한다.
+    if resolved_path.startswith(("\"", "'")) and resolved_path.endswith(("\"", "'")) and len(resolved_path) >= 2:
+        resolved_path = resolved_path[1:-1].strip()
+    if resolved_path.startswith("file://"):
+        resolved_path = resolved_path[7:]
+    resolved_path = resolved_path.replace("\u00a0", " ").strip()
+
+    artifact_name: str | None = None
+    if not resolved_path:
+        resolved_path, artifact_name = await _resolve_excel_path_from_artifact(tool_context)
+        if not resolved_path:
+            return {
+                "error": (
+                    "분석할 파일이 없습니다. UI에서 엑셀 파일을 첨부한 뒤 다시 요청하거나 "
+                    "`file_path` 인자를 전달하세요."
+                )
+            }
+
+    result = _parse_excel_file(resolved_path)
+
+    # artifact에서 생성된 임시 파일은 파싱 후 즉시 삭제한다.
+    if artifact_name:
+        try:
+            Path(resolved_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    if result.get("error"):
+        return result
+
     if artifact_name:
         result["artifact_name"] = artifact_name
-        result["resolved_file_path"] = str(path)
 
     tool_context.state["parsed_records"] = result
     return result

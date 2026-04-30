@@ -33,9 +33,10 @@ from pathlib import Path
 import sqlite3
 from threading import Lock
 
-logger = logging.getLogger("adk2_labs.monitoring")
+logger = logging.getLogger("weekly_project_report.monitoring")
 _DB_LOCK = Lock()
-_MONITOR_DB_PATH = Path(os.getenv("WEEKLY_PROJECT_REPORT_MONITOR_DB", "src/.adk/monitoring.db"))
+_MONITOR_DB_PATH = Path(os.getenv("WEEKLY_PROJECT_REPORT_MONITOR_DB", "src/weekly_project_report/.adk/monitoring.db"))
+_db_initialized: bool = False
 
 
 def _init_monitor_db() -> None:
@@ -63,6 +64,14 @@ def _init_monitor_db() -> None:
             conn.close()
 
 
+def _ensure_db_initialized() -> None:
+    """DB를 최초 1회만 초기화한다 (중복 CREATE TABLE 호출 방지)."""
+    global _db_initialized
+    if not _db_initialized:
+        _init_monitor_db()
+        _db_initialized = True
+
+
 def record_monitor_event(
     event_type: str,
     *,
@@ -74,7 +83,7 @@ def record_monitor_event(
     payload: dict | None = None,
 ) -> None:
     """Persist a monitoring event into SQLite."""
-    _init_monitor_db()
+    _ensure_db_initialized()
     with _DB_LOCK:
         conn = sqlite3.connect(_MONITOR_DB_PATH)
         try:
@@ -102,7 +111,7 @@ def record_monitor_event(
 
 def get_monitoring_summary(window_minutes: int = 60) -> dict:
     """Return practical monitoring summary for recent activity."""
-    _init_monitor_db()
+    _ensure_db_initialized()
     window_start = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
     rows: list[tuple] = []
 

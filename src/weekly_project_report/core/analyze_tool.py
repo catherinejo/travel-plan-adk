@@ -8,6 +8,7 @@ import json
 from google.adk.tools.tool_context import ToolContext
 from pydantic import ValidationError
 
+from ._utils import _format_validation_error
 from ..schemas.model import AnalysisResult
 from ..schemas.model import ProjectAggregate
 
@@ -61,15 +62,6 @@ def _impact_from_issue(text: str) -> str:
     if any(k in normalized for k in ("비용", "예산", "투입", "리소스")):
         return "COST"
     return "QUALITY"
-
-
-def _format_validation_error(exc: ValidationError) -> str:
-    parts: list[str] = []
-    for err in exc.errors():
-        loc = ".".join(str(x) for x in err.get("loc", []))
-        msg = err.get("msg", "invalid value")
-        parts.append(f"{loc}: {msg}" if loc else msg)
-    return "; ".join(parts[:5])
 
 
 async def analyze_tool(

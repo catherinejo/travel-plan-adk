@@ -4,6 +4,18 @@ from __future__ import annotations
 
 import json
 
+from pydantic import ValidationError
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Pydantic ValidationError를 사람이 읽기 쉬운 문자열로 변환한다."""
+    parts: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err.get("loc", []))
+        msg = err.get("msg", "invalid value")
+        parts.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(parts[:5])
+
 
 def parse_json_dict(json_str: str, arg_name: str) -> tuple[dict, dict | None]:
     """JSON 문자열을 dict로 파싱한다.

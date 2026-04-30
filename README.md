@@ -1,7 +1,7 @@
 # weekly_review_report_adk — 주간 업무 보고서 자동화 파이프라인
 
 Google ADK 2.0 기반 멀티 에이전트 파이프라인.  
-센터별 엑셀 파일을 업로드하면 파싱 → 취합 → 분석 → 보고서 작성까지 자동으로 처리합니다.
+센터별 엑셀 파일을 업로드하면 **병렬 파싱 → 취합 → 병렬 분석 → 보고서 작성**까지 자동으로 처리합니다.
 
 [![CI](https://github.com/catherinejo/weekly-review-report-adk/actions/workflows/ci.yml/badge.svg)](https://github.com/catherinejo/weekly-review-report-adk/actions/workflows/ci.yml)
 
@@ -13,31 +13,53 @@ Google ADK 2.0 기반 멀티 에이전트 파이프라인.
 사용자 입력
     │
     ▼
-intent_router          ← REPORT / GENERAL 분류
+intent_router                  ← REPORT / GENERAL 분류
     │
     ├─ GENERAL ──→ general_response_agent   (일반 질문 응답)
     │
     └─ REPORT ──→ WeeklyReportWorkflow
                       │
                       ▼
-                  parser_agent           ← 엑셀 파싱 + TaskItem 검증
+              ┌─ MultiFileParseWorkflow ─────────────────────────┐
+              │  list_excel_artifacts_node                        │  ← 업로드 파일 목록 수집
+              │      │                                            │
+              │      ▼  (Fan-out: 파일마다 병렬)                  │
+              │  parse_single_artifact_node × N                   │  ← 각 파일 동시 파싱
+              │      │                                            │
+              │      ▼  (Fan-in)                                  │
+              │  merge_parsed_results_node                        │  ← 레코드 병합
+              └──────────────────────────────────────────────────┘
                       │  NEXT
                       ▼
-                  aggregator_agent       ← 프로젝트별 취합 + ProjectAggregate 검증
+              aggregator_agent                                    ← 프로젝트별 취합
                       │  NEXT
                       ▼
-                  analyzer_agent         ← 인사이트 분석 + AnalysisResult 검증
+              ┌─ ParallelAnalysisWorkflow ───────────────────────┐
+              │  ┌─────────────────┐  ┌────────────────────────┐ │
+              │  │ risk_analyzer   │  │ achievement_analyzer   │ │  ← 동시 실행
+              │  │ _agent          │  │ _agent                 │ │
+              │  │ (리스크·이슈)   │  │ (성과·진척·계획)       │ │
+              │  └────────┬────────┘  └──────────┬─────────────┘ │
+              │           └──────────┬────────────┘               │
+              │                      ▼  (JoinNode)                │
+              │           merge_analysis_results_node             │  ← AnalysisResult 병합
+              └──────────────────────────────────────────────────┘
                       │  NEXT
                       ▼
-                  writer_agent           ← 마크다운 보고서 작성
+              writer_agent                                        ← 마크다운 보고서 작성
                       │  NEXT
                       ▼
-                  final_report_agent     ← 최종 응답 반환
+              final_report_agent                                  ← 최종 응답 반환
                       │
-                  (오류 발생 시 → error_agent)
+              (오류 발생 시 → error_agent, 각 단계 1회 자동 재시도)
 ```
 
-각 단계는 오류 발생 시 **1회 자동 재시도** 후 `error_agent`로 분기됩니다.
+### ADK Workflow 패턴
+
+| 패턴 | 구현 위치 | 설명 |
+|---|---|---|
+| **Fan-out / Fan-in** | `MultiFileParseWorkflow` | `_ParallelWorker`로 N개 파일을 동시 파싱 후 병합 |
+| **Parallel Flow** | `ParallelAnalysisWorkflow` | Workflow 팬아웃으로 두 분석 에이전트를 동시 실행, `JoinNode`로 합산 |
 
 ---
 
@@ -67,7 +89,7 @@ uv sync
 uv run adk web
 ```
 
-브라우저에서 `http://localhost:8000` 접속 후 엑셀 파일을 첨부하고 요청합니다.
+브라우저에서 `http://localhost:8000` 접속 후 엑셀 파일(단일 또는 여러 개)을 첨부하고 요청합니다.
 
 ```
 예시: "이번 주 보고서 작성해줘"
@@ -77,7 +99,7 @@ uv run adk web
 
 ## 엑셀 파일 형식
 
-두 가지 형식을 자동 인식합니다.
+두 가지 형식을 자동 인식합니다. **파일을 여러 개 동시에 업로드**하면 센터별로 병렬 파싱 후 통합 보고서를 생성합니다.
 
 ### 형식 A — 헤더 기반 (권장)
 
@@ -108,19 +130,21 @@ uv run adk web
 weekly-review-report-adk/
 ├── src/weekly_project_report/
 │   ├── core/
-│   │   ├── _utils.py          # 공통 JSON 파싱 유틸리티
-│   │   ├── agent.py           # 에이전트 & 워크플로 정의
-│   │   ├── parse_tool.py      # 엑셀 파싱 도구
-│   │   ├── aggregate_tool.py  # 프로젝트별 취합 도구
-│   │   ├── analyze_tool.py    # 분석 도구
-│   │   ├── report_tool.py     # 보고서 작성 + PDF 변환 도구
-│   │   ├── prompts.py         # 에이전트 프롬프트
-│   │   ├── model_config.py    # 모델 설정
-│   │   └── guardrails.py      # 콜백 안전장치
+│   │   ├── agent.py               # 에이전트 & 워크플로 정의 (최상위 배선)
+│   │   ├── fanout.py              # Fan-out/Fan-in: 멀티파일 병렬 파싱 워크플로
+│   │   ├── parallel_analysis.py   # Parallel Flow: 병렬 분석 워크플로
+│   │   ├── parse_tool.py          # 엑셀 파싱 도구 (_parse_excel_file 포함)
+│   │   ├── aggregate_tool.py      # 프로젝트별 취합 도구
+│   │   ├── analyze_tool.py        # 분석 공통 함수
+│   │   ├── report_tool.py         # 보고서 작성 + PDF 변환 도구
+│   │   ├── prompts.py             # 에이전트 프롬프트
+│   │   ├── model_config.py        # 모델 설정
+│   │   └── _utils.py              # 공통 JSON 파싱 유틸리티
+│   ├── guardrails.py              # 콜백 안전장치 (콘텐츠 필터, 속도 제한, 감사 로그)
 │   └── schemas/
-│       └── model.py           # Pydantic 데이터 스키마
-├── tests/                     # 단위 테스트 (89개)
-├── .github/workflows/ci.yml   # GitHub Actions CI
+│       └── model.py               # Pydantic 데이터 스키마
+├── tests/                         # 단위 테스트 (89개)
+├── .github/workflows/ci.yml       # GitHub Actions CI
 ├── pyproject.toml
 └── uv.lock
 ```
@@ -133,9 +157,9 @@ weekly-review-report-adk/
 
 | 스키마 | 설명 | 사용 단계 |
 |---|---|---|
-| `TaskItem` | 개별 업무 레코드 | parser → aggregator |
-| `ProjectAggregate` | 프로젝트별 취합 결과 | aggregator → analyzer |
-| `AnalysisResult` | 분석 결과 + 인사이트 | analyzer → writer |
+| `TaskItem` | 개별 업무 레코드 | MultiFileParseWorkflow → aggregator |
+| `ProjectAggregate` | 프로젝트별 취합 결과 | aggregator → ParallelAnalysisWorkflow |
+| `AnalysisResult` | 분석 결과 + 인사이트 | ParallelAnalysisWorkflow → writer |
 
 ---
 
@@ -144,7 +168,7 @@ weekly-review-report-adk/
 | 변수 | 필수 | 기본값 | 설명 |
 |---|---|---|---|
 | `GOOGLE_API_KEY` | ✅ | — | Google Gemini API Key |
-| ` WEEKLY_PROJECT_REPORT_AGENT_MODEL` | — | `gemini-2.5-flash` | 사용할 모델 |
+| `WEEKLY_PROJECT_REPORT_AGENT_MODEL` | — | `gemini-2.5-flash` | 사용할 모델 |
 
 ---
 
@@ -155,13 +179,13 @@ weekly-review-report-adk/
 uv sync --extra dev
 
 # 테스트
-uv run pytest tests/ -v
+uv run --extra dev pytest tests/ -v
 
 # 린트
-uv run ruff check src/ tests/
+uv run --extra dev ruff check src/ tests/
 
 # 자동 수정
-uv run ruff check --fix src/ tests/
+uv run --extra dev ruff check --fix src/ tests/
 ```
 
 ### CI
